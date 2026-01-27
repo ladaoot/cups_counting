@@ -1,0 +1,11 @@
+streamlit
+streamlit-webrtc
+av
+ultralytics
+opencv-python
+numpy
+pillow
+pandas
+openpyxl
+reportlab
+matplotlib
