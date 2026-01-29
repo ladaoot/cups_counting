@@ -140,12 +140,10 @@ def detect_and_count_on_video(
     max_det: int = 300,
     sample_every_n_frames: int = 1,
     progress_callback: Optional[Callable[[float], None]] = None,
-) -> Tuple[str, DetectionSummary]:
+) -> Tuple[str, DetectionSummary, str, List[int]]:  # Добавили возврат списка кадров
     """
-    Processes a video file and writes an annotated mp4 next to it.
-    Returns: (output_video_path, summary_over_all_frames)
-
-    Note: for a simple practice, we aggregate counts as average per frame + max per frame.
+    Обрабатывает видео файл
+    Returns: (output_video_path, summary, frames_data_path, frame_counts)
     """
     import time
     from pathlib import Path
@@ -270,5 +268,7 @@ def detect_and_count_on_video(
         inference_ms=float(dt_ms),
         max_per_frame=int(max_count),
     )
-    return out_path, summary, frames_data_path
+
+    # Возвращаем данные
+    return out_path, summary, frames_data_path, frame_counts
 
