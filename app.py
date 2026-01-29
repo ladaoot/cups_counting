@@ -133,17 +133,70 @@ with tabs[0]:
 
 with tabs[1]:
     st.write("Загрузите одно или несколько видео и нажмите **Запустить обработку** (создастся аннотированный mp4).")
+    
+    # Инициализация session_state для хранения результатов
+    if "video_results" not in st.session_state:
+        st.session_state.video_results = []
+    
     upv_list = st.file_uploader(
         "Видео (mp4/avi/mov)", 
         type=["mp4", "avi", "mov"],
-        accept_multiple_files=True
+        accept_multiple_files=True,
+        key="video_uploader"
     )
+    
+    # Кнопка очистки результатов
+    if st.session_state.video_results:
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            if st.button("🗑️ Очистить результаты", type="secondary"):
+                st.session_state.video_results = []
+                st.rerun()
+    
     runv = st.button("Запустить обработку видео", type="primary", disabled=not upv_list)
 
     if upv_list:
         st.write(f"Загружено видео: **{len(upv_list)}**")
         for upv in upv_list:
             st.text(f"📹 {upv.name} ({upv.size / 1024 / 1024:.2f} MB)")
+
+    # Показываем сохраненные результаты
+    if st.session_state.video_results:
+        st.divider()
+        st.subheader("📹 Результаты обработки видео")
+        for result_idx, result in enumerate(st.session_state.video_results):
+            st.subheader(f"Результат: {result['input_name']}")
+            st.write(
+                f"Подсчёт: **{result['total_count']}** (среднее на обработанный кадр), "
+                f"максимум на кадр: **{result['max_per_frame']}**"
+            )
+            st.write(f"Время обработки (ms): **{result['inference_ms']:.1f}**")
+            
+            # Отображение видео
+            video_file = Path(result['out_path'])
+            if video_file.exists():
+                try:
+                    # Читаем видео в байты для отображения
+                    with open(video_file, "rb") as video_file_handler:
+                        video_bytes = video_file_handler.read()
+                    
+                    # Отображаем видео (st.video автоматически определяет формат)
+                    st.video(video_bytes)
+                    
+                    # Кнопка скачивания
+                    st.download_button(
+                        f"💾 Скачать аннотированное видео: {video_file.name}", 
+                        data=video_bytes, 
+                        file_name=video_file.name,
+                        key=f"download_saved_{result_idx}",
+                        mime="video/mp4"
+                    )
+                except Exception as e:
+                    st.error(f"Ошибка при отображении видео: {e}")
+                    st.write(f"Путь к файлу: {video_file}")
+            else:
+                st.error(f"Файл не найден: {result['out_path']}")
+            st.divider()
 
     if runv and upv_list:
         classes = ["cup"]  # Всегда ищем стаканы/кружки
@@ -180,27 +233,19 @@ with tabs[1]:
             video_progress.empty()
             video_status.empty()
 
-            st.subheader(f"Результат: {upv.name}")
-            st.write(
-                f"Подсчёт: **{summary.total_count}** (среднее на обработанный кадр), "
-                f"максимум на кадр: **{summary.max_per_frame}**"
-            )
-            st.write(f"Время обработки (ms): **{summary.inference_ms:.1f}**")
-
-            # Исправляем отображение видео - используем правильный путь
-            video_file = Path(out_path)
-            if video_file.exists():
-                with open(video_file, "rb") as video_file_handler:
-                    video_bytes = video_file_handler.read()
-                    st.video(video_bytes)
-                    st.download_button(
-                        f"Скачать аннотированное видео: {video_file.name}", 
-                        data=video_bytes, 
-                        file_name=video_file.name,
-                        key=f"download_{idx}"
-                    )
-            else:
-                st.error(f"Файл не найден: {out_path}")
+            # Сохраняем результат в session_state
+            result_data = {
+                "input_name": upv.name,
+                "out_path": out_path,
+                "total_count": summary.total_count,
+                "max_per_frame": summary.max_per_frame,
+                "inference_ms": summary.inference_ms,
+                "summary": summary,
+                "frames_data_path": frames_data_path
+            }
+            st.session_state.video_results.append(result_data)
+            
+            st.success(f"✅ Видео {upv.name} обработано! Результат сохранен.")
 
             # Сохраняем путь к данным по кадрам в истории
             video_record = HistoryRecord(
@@ -227,7 +272,6 @@ with tabs[1]:
                     frames_index_path = DATA_DIR / "video_frames_index.jsonl"
                     frames_index_path.parent.mkdir(parents=True, exist_ok=True)
                     with frames_index_path.open("a", encoding="utf-8") as f:
-                        import json
                         index_entry = {
                             "video_name": upv.name,
                             "frames_data_path": frames_data_path,
@@ -239,7 +283,7 @@ with tabs[1]:
         
         progress_bar.empty()
         status_text.empty()
-        st.success(f"Обработано {len(upv_list)} видео. Записи добавлены в историю.")
+        st.rerun()  # Перезагружаем страницу для отображения результатов
 
 
 with tabs[2]:
@@ -257,16 +301,26 @@ with tabs[2]:
     class_ids = _get_class_ids(model, classes)
     stats_lock = Lock()
     
-    # Инициализация состояния камеры
-    if "camera_last" not in st.session_state:
-        st.session_state.camera_last = {"count": 0, "ms": 0.0, "per_class": {}}
+    # Класс для хранения состояния камеры (доступен из обоих потоков)
+    class CameraState:
+        def __init__(self):
+            self.last_count = 0
+            self.last_ms = 0.0
+            self.last_per_class = {}
+            self.last_save = 0.0
+            self.save_count = 0
+    
+    # Инициализируем состояние камеры (один раз при первом запуске)
+    if "camera_state_obj" not in st.session_state:
+        st.session_state.camera_state_obj = CameraState()
+    
+    camera_state = st.session_state.camera_state_obj
+    
+    # Инициализация состояния камеры в session_state для совместимости
     if "camera_last_save" not in st.session_state:
         st.session_state.camera_last_save = 0.0
     if "camera_save_count" not in st.session_state:
         st.session_state.camera_save_count = 0
-
-    # Используем общий словарь для синхронизации между потоками
-    camera_shared_state = {"last_save": 0.0, "save_count": 0, "last_count": 0, "last_ms": 0.0, "last_per_class": {}}
     
     class YoloVideoTransformer(VideoTransformerBase):
         def __init__(self):
@@ -306,24 +360,20 @@ with tabs[2]:
             current_time = time.time()
             
             with stats_lock:
-                # Обновляем общее состояние для отображения (работает в отдельном потоке)
-                camera_shared_state["last_count"] = cnt
-                camera_shared_state["last_ms"] = float(dt_ms)
-                camera_shared_state["last_per_class"] = per_class_count.copy()
+                # Обновляем состояние камеры (работает в отдельном потоке)
+                camera_state.last_count = cnt
+                camera_state.last_ms = float(dt_ms)
+                camera_state.last_per_class = per_class_count.copy()
                 
-                # Обновляем session_state если доступен
+                # Также обновляем session_state для совместимости
                 try:
-                    st.session_state.camera_last = {
-                        "count": cnt, 
-                        "ms": float(dt_ms),
-                        "per_class": per_class_count.copy()
-                    }
+                    st.session_state.camera_state_obj = camera_state
                 except:
-                    pass  # Если session_state недоступен в потоке, пропускаем
+                    pass
                 
-                # Автосохранение через общий словарь
+                # Автосохранение
                 if auto_save_enabled:
-                    time_since_last_save = current_time - camera_shared_state["last_save"]
+                    time_since_last_save = current_time - camera_state.last_save
                     if time_since_last_save >= auto_save_interval:
                         per_class_snapshot = per_class_count.copy()
                         if not per_class_snapshot and cnt > 0:
@@ -334,7 +384,7 @@ with tabs[2]:
                                 HistoryRecord(
                                     ts_iso=utc_now_iso(),
                                     kind="camera",
-                                    input_name=f"webcam_auto_{camera_shared_state['save_count']}",
+                                    input_name=f"webcam_auto_{camera_state.save_count}",
                                     model_name=model_path,
                                     target_classes=classes,
                                     conf=float(conf),
@@ -345,15 +395,10 @@ with tabs[2]:
                                 ),
                                 HISTORY_PATH,
                             )
-                            camera_shared_state["last_save"] = current_time
-                            camera_shared_state["save_count"] += 1
-                            
-                            # Обновляем session_state если доступен
-                            try:
-                                st.session_state.camera_last_save = current_time
-                                st.session_state.camera_save_count = camera_shared_state["save_count"]
-                            except:
-                                pass
+                            camera_state.last_save = current_time
+                            camera_state.save_count += 1
+                            st.session_state.camera_save_count = camera_state.save_count
+                            st.session_state.camera_last_save = current_time
                         except Exception as e:
                             # Логируем ошибку, но не прерываем обработку
                             print(f"Ошибка автосохранения: {e}")
@@ -367,38 +412,39 @@ with tabs[2]:
         async_processing=True,
     )
 
-    # Используем общее состояние для отображения (работает в основном потоке)
+    # Используем состояние камеры для отображения (работает в основном потоке)
     with stats_lock:
-        current_count = camera_shared_state["last_count"]
-        current_ms = camera_shared_state["last_ms"]
-        current_per_class = camera_shared_state["last_per_class"].copy()
-        # Синхронизируем счетчик из общего состояния
-        if "camera_save_count" in st.session_state:
-            st.session_state.camera_save_count = camera_shared_state["save_count"]
-        else:
-            st.session_state.camera_save_count = camera_shared_state["save_count"]
+        current_count = camera_state.last_count
+        current_ms = camera_state.last_ms
+        current_per_class = camera_state.last_per_class.copy()
+        current_save_count = camera_state.save_count
     
+    # Обновляем отображение метрик
     c1, c2, c3 = st.columns(3)
     c1.metric("Текущий подсчёт", current_count)
     c2.metric("Инференс на кадр (ms)", f"{current_ms:.1f}")
-    c3.metric("Автосохранений", camera_shared_state["save_count"])
+    c3.metric("Автосохранений", current_save_count)
     
     # Показываем детальную статистику по классам
     if current_per_class:
         st.write("**Подсчёт по классам:**")
         st.json(current_per_class)
+    elif current_count > 0:
+        st.write(f"**Обнаружено стаканов/кружек: {current_count}**")
+    else:
+        st.info("🔍 Ожидание обнаружения стаканов/кружек...")
     
     # Показываем статус автосохранения
     if auto_save_enabled and ctx.state.playing:
-        time_since_last = time.time() - camera_shared_state["last_save"]
+        time_since_last = time.time() - camera_state.last_save
         remaining = max(0, auto_save_interval - time_since_last)
         st.info(f"⏱️ Следующее автосохранение через {remaining:.1f} сек (интервал: {auto_save_interval} сек)")
 
     if ctx.state.playing and st.button("Сохранить снимок в историю вручную"):
         with stats_lock:
-            manual_count = camera_shared_state["last_count"]
-            manual_ms = camera_shared_state["last_ms"]
-            manual_per_class = camera_shared_state["last_per_class"].copy()
+            manual_count = camera_state.last_count
+            manual_ms = camera_state.last_ms
+            manual_per_class = camera_state.last_per_class.copy()
         
         per_class_snapshot = manual_per_class.copy()
         if not per_class_snapshot and manual_count > 0:
@@ -419,7 +465,7 @@ with tabs[2]:
             ),
             HISTORY_PATH,
         )
-        camera_shared_state["last_save"] = time.time()
+        camera_state.last_save = time.time()
         st.success("Снимок добавлен в историю вручную.")
 
 
