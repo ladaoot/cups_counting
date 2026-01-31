@@ -31,7 +31,7 @@ def _lazy_import_ultralytics():
 
 
 @lru_cache(maxsize=3)
-def load_model(model_path: str = "yolov8n.pt"):
+def load_model(model_path: str = "yolov8s.pt"):
     YOLO = _lazy_import_ultralytics()
     return YOLO(model_path)
 
@@ -63,7 +63,7 @@ def _get_selected_classes(names: Dict[int, str], want: Iterable[str]) -> Tuple[L
 def detect_and_count_on_image(
     image_rgb: np.ndarray,
     *,
-    model_path: str = "yolov8n.pt",
+    model_path: str = "yolov8s.pt",
     target_classes: Optional[List[str]] = None,
     conf: float = 0.35,
     iou: float = 0.45,
@@ -133,7 +133,7 @@ def detect_and_count_on_image(
 def detect_and_count_on_video(
     video_path: str,
     *,
-    model_path: str = "yolov8n.pt",
+    model_path: str = "yolov8s.pt",
     target_classes: Optional[List[str]] = None,
     conf: float = 0.35,
     iou: float = 0.45,

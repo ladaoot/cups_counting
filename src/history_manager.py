@@ -1,7 +1,5 @@
-# src/history_manager.py
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -80,13 +78,13 @@ class HistoryManager:
 
     def add_camera_record(self,
                           input_name: str,
-                          model_name: str,
                           total_count: int,
                           per_class_count: Dict[str, int],
                           inference_ms: float,
                           target_classes: Optional[List[str]] = None,
                           conf: float = 0.35,
-                          iou: float = 0.45) -> None:
+                          iou: float = 0.45,
+                          model_name: str = "yolov8s.pt",) -> None:
         """Добавляет запись с камеры"""
         record = HistoryRecord(
             ts_iso=self._utc_now_iso(),

@@ -1,7 +1,5 @@
-# src/camera.py
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
 from threading import Lock
 from typing import Dict, Optional
@@ -24,7 +22,7 @@ class CameraState:
 class CameraProcessor:
     """Процессор для обработки потока с камеры"""
 
-    def __init__(self, model_path: str = "yolov8n.pt",
+    def __init__(self, model_path: str = "yolov8s.pt",
                  target_classes: Optional[list] = None,
                  conf: float = 0.35,
                  iou: float = 0.45):
@@ -119,7 +117,7 @@ class CameraProcessor:
 _camera_processor: Optional[CameraProcessor] = None
 
 
-def get_camera_processor(model_path: str = "yolov8n.pt",
+def get_camera_processor(model_path: str = "yolov8s.pt",
                          target_classes: Optional[list] = None,
                          conf: float = 0.35,
                          iou: float = 0.45) -> CameraProcessor:

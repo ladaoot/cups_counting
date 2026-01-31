@@ -1,10 +1,9 @@
-# app.py (обновленная версия)
 from __future__ import annotations
 
 import json
 import tempfile
 from pathlib import Path
-from typing import Dict, List
+from typing import List
 
 import numpy as np
 import pandas as pd
@@ -12,19 +11,18 @@ import streamlit as st
 from PIL import Image
 
 from src.analytics import AnalyticsEngine
-from src.camera import CameraProcessor, get_camera_processor, reset_camera_processor
+from src.camera import get_camera_processor, reset_camera_processor
 from src.history_manager import HistoryManager
 from src.infer import detect_and_count_on_image, detect_and_count_on_video
 from src.reports import make_excel_bytes, make_pdf_bytes
 
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 from datetime import datetime, timezone
 
 # Конфигурация
-APP_TITLE = "Практика CV: подсчёт стаканов/кружек (YOLOv8)"
+APP_TITLE = "Подсчёт стаканов/кружек (YOLOv8)"
 DATA_DIR = Path("data")
 HISTORY_PATH = DATA_DIR / "history.jsonl"
 
@@ -53,10 +51,6 @@ st.title(APP_TITLE)
 
 # Боковая панель
 with st.sidebar:
-    st.subheader("Настройки модели")
-    model_path = st.text_input("Модель (веса Ultralytics)", value="yolov8n.pt")
-    conf = st.slider("Confidence", 0.05, 0.95, 0.35, 0.05)
-    iou = st.slider("IoU", 0.05, 0.95, 0.45, 0.05)
 
     st.subheader("Видео")
     sample_every = st.number_input("Обрабатывать каждый N‑й кадр", min_value=1, max_value=30, value=1, step=1)
@@ -102,10 +96,7 @@ with tabs[0]:
             image_rgb = np.array(Image.open(up).convert("RGB"))
             annotated_rgb, summary = detect_and_count_on_image(
                 image_rgb,
-                model_path=model_path,
                 target_classes=classes,
-                conf=float(conf),
-                iou=float(iou),
             )
 
             # Отображение результата
@@ -184,28 +175,9 @@ with tabs[1]:
                     # Проверяем размер файла
                     file_size_mb = video_file.stat().st_size / (1024 * 1024)
 
-                    if file_size_mb > 50:  # Если файл больше 50 MB
-                        st.warning(f"Видео файл очень большой ({file_size_mb:.1f} MB). Для просмотра скачайте его.")
+                    with open(video_file, "rb") as f:
+                        video_bytes = f.read()
 
-                        # Показываем первый кадр как превью
-                        try:
-                            import cv2
-
-                            cap = cv2.VideoCapture(str(video_file))
-                            ret, frame = cap.read()
-                            if ret:
-                                # Конвертируем BGR в RGB
-                                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                                st.image(frame_rgb, caption="Первый кадр видео", use_container_width=True)
-                            cap.release()
-                        except:
-                            pass
-                    else:
-                        # Отображаем видео напрямую
-                        with open(video_file, "rb") as f:
-                            video_bytes = f.read()
-
-                        st.video(video_bytes)
 
                     # Кнопка скачивания
                     st.download_button(
@@ -257,10 +229,7 @@ with tabs[1]:
             with st.spinner(f"Обработка {upv.name}..."):
                 out_path, summary, frames_data_path, frame_counts = detect_and_count_on_video(
                     tmp_in,
-                    model_path=model_path,
                     target_classes=classes,
-                    conf=float(conf),
-                    iou=float(iou),
                     sample_every_n_frames=int(sample_every),
                     progress_callback=update_video_progress,
                 )
@@ -326,10 +295,7 @@ with tabs[2]:
 
     # Создаем или получаем процессор камеры
     camera_processor = get_camera_processor(
-        model_path=model_path,
         target_classes=["cup"],
-        conf=float(conf),
-        iou=float(iou)
     )
 
 
@@ -351,13 +317,10 @@ with tabs[2]:
                     # Сохраняем в историю
                     history_manager.add_camera_record(
                         input_name=f"webcam_auto_{camera_processor.state.save_count}",
-                        model_name=model_path,
                         total_count=count,
                         per_class_count=per_class_count,
                         inference_ms=inference_ms,
                         target_classes=["cup"],
-                        conf=float(conf),
-                        iou=float(iou),
                     )
 
                     # Обновляем состояние
@@ -435,13 +398,10 @@ with tabs[2]:
 
             history_manager.add_camera_record(
                 input_name="webcam_manual",
-                model_name=model_path,
                 total_count=count,
                 per_class_count=per_class_count,
                 inference_ms=inference_ms,
                 target_classes=["cup"],
-                conf=float(conf),
-                iou=float(iou),
             )
 
             st.success("Снимок сохранен в историю!")
